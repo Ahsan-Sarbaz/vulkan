@@ -94,6 +94,49 @@ the call returns, such as the `PUserData` of a debug messenger or of allocation
 callbacks. Keep what that points to outside the Go heap, or pin it with
 `runtime.Pinner`, for as long as Vulkan may use it.
 
+## Performance
+
+The same Vulkan call made through this binding, hand-written cgo, purego's
+public API and the other Go Vulkan bindings, against one MoltenVK device on an
+Apple M4 Max. Nanoseconds a call, median of ten runs, allocations in brackets
+where there are any. Each binding is used as its documentation says, so a row
+includes what it takes to get a usable Go value back.
+
+| call | this | cgo, typed | cgo, `void*` | goki | go-vk | vkngwrapper loader | vkngwrapper | purego `SyscallN` | purego `RegisterFunc` |
+|---|---|---|---|---|---|---|---|---|---|
+| `CmdSetStencilReference` | 29.6 | 21.3 | 21.3 | 23.2 | 29.7 | 24.4 | 26.5 | 63.4 (1) | 166 (4) |
+| `CmdSetScissor`, one rect | 32.2 | 24.0 | 32.4 | 562 (8) | 35.4 | 27.5 | 40.1 | 66.5 (1) | 189 (4) |
+| `GetDeviceQueue` | 27.7 | 20.2 | 29.4 | 30.2 | 31.8 | 30.9 | 39.4 (1) | 63.9 (1) | 187 (4) |
+| `GetPhysicalDeviceProperties` | 36.3 | | 37.5 | 1127 (9) | 514 (5) | 32.6 | 237 (5) | 70.0 (1) | 159 (2) |
+| `CreateBuffer` + `DestroyBuffer` | 80.1 | | 110 (2) | 284 (4) | 88.1 | 123 (2) | 138 (2) | | 439 (10) |
+
+What it shows:
+
+- A bare call costs about 8 ns more than the cheapest cgo can do: the fixed
+  argument block and purego's trampoline, which reads errno on darwin.
+- cgo checks every `unsafe.Pointer` argument at run time, and that check costs
+  about as much, so against cgo as a binding over Go memory writes it -- the
+  `void*` column -- a call with a pointer comes out level or ahead. cgo also
+  moves what such a pointer addresses to the heap; this binding does not.
+- Nothing here allocates. Bindings with their own Go struct layouts convert on
+  every call, and on a struct or a slice that is 6 to 30 times the call.
+- The loader's trampolines, which serve a second device, cost about a
+  nanosecond a call on this driver.
+
+At ten thousand calls a frame the gap to the cgo floor is under a tenth of a
+millisecond. The driver's own work is usually most of each call.
+
+The code is in [`benchmarks`](benchmarks), a module of its own so that the
+bindings it compares against stay out of this one's dependencies. It needs cgo
+and the Vulkan headers:
+
+```sh
+cd benchmarks
+CGO_CFLAGS=-I$VULKAN_SDK/include go test -run '^$' -bench . -count 10
+```
+
+`bench_test.go` says what each row is and the settings macOS needs.
+
 ## Platforms
 
 amd64 and arm64 on Linux, Windows and macOS. With `CGO_ENABLED=0`, FreeBSD does
