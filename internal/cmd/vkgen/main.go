@@ -186,6 +186,9 @@ func main() {
 		if n := f.floatParams(); n > 8 {
 			log.Fatalf("%s takes %d floats, past the 8 float registers ccall fills", f.CName, n)
 		}
+		if !f.floatsLast() {
+			log.Fatalf("%s takes a float before an integer, which ccall's Windows path cannot place", f.CName)
+		}
 		switch f.Level {
 		case "global":
 			byLevel[0]++

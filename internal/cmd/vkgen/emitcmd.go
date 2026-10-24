@@ -248,6 +248,21 @@ func (f vkFn) floatParams() int {
 	return n
 }
 
+// floatsLast reports whether every float parameter follows every integer one.
+// The Windows ABI numbers the two together, and ccall places floats after the
+// integers there.
+func (f vkFn) floatsLast() bool {
+	seen := false
+	for _, p := range f.Params {
+		if _, ok := floatMethod[p.Type]; ok {
+			seen = true
+		} else if seen {
+			return false
+		}
+	}
+	return true
+}
+
 func (f vkFn) signature() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "func %s(", f.GoName)

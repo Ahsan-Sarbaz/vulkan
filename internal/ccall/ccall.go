@@ -91,6 +91,18 @@
 //
 // runtime.cgocall, which this package actually calls, is still permitted.
 //
+// # Windows
+//
+// purego has no trampoline there: Windows has one C calling convention on x64
+// and the runtime already speaks it, so Frame.call is syscall.SyscallN, which
+// is nosplit like cgocall and keeps the same no-stack-move rule, and whose
+// argument slice does not escape. That ABI numbers arguments by position, an
+// int and a float sharing slot i, and the runtime loads the first four slots
+// into both register files; so the floats are passed as their bits in the
+// slots after the integers. That is right for a function whose floats all come
+// after its integers, which is every float-taking command in vk.xml and the
+// generator's check, and wrong for any other. A float result is not read back.
+//
 // # Coupling
 //
 // The linknames reach into purego's internals, which is a real dependency on
@@ -100,12 +112,7 @@
 // so an upgrade that reshapes them breaks a test rather than a renderer.
 package ccall
 
-import (
-	"math"
-	"unsafe"
-
-	_ "github.com/ebitengine/purego" // for the linknames below
-)
+import "math"
 
 // syscallArgs is purego's argument block, and the layout its assembly reads.
 // The stub loads the a slots into the integer registers, then the stack, and
@@ -118,31 +125,6 @@ type syscallArgs struct {
 	floats                                                                              [8]uintptr // purego's f1..f8
 	arm64R8                                                                             uintptr
 }
-
-// syscallXABI0 is the address of purego's ABI0 trampoline.
-//
-//go:linkname syscallXABI0 github.com/ebitengine/purego.syscallXABI0
-var syscallXABI0 uintptr
-
-// trampoline is syscallXABI0 as cgocall takes it, converted once so the nosplit
-// path makes no call before cgocall's.
-var trampoline unsafe.Pointer
-
-// A variable linkname to a name purego no longer has links as 0 rather than
-// failing, and cgocall(nil) is a fatal error that recover cannot catch.
-func init() {
-	if syscallXABI0 == 0 {
-		panic("ccall: github.com/ebitengine/purego.syscallXABI0 linked as 0; purego renamed its trampoline, so update the linkname and syscallArgs in internal/ccall to match")
-	}
-	trampoline = fnPtr(syscallXABI0)
-}
-
-// cgocall is the runtime's own C entry: it enters a syscall, switches to the
-// system stack, and calls fn with arg.
-//
-//go:linkname cgocall runtime.cgocall
-//go:noescape
-func cgocall(fn, arg unsafe.Pointer) int32
 
 // Frame is one C call's argument block, declared by the function that converts
 // the call's Go addresses: new(ccall.Frame).CallN(...). The package comment says why.
@@ -166,123 +148,110 @@ func (f *Frame) Float64Result() float64 { return math.Float64frombits(uint64(f.f
 //go:nosplit
 func (f *Frame) Call0(fn uintptr) uintptr {
 	f.fn = fn
-	return f.call()
+	return f.call(0)
 }
 
 //go:nosplit
 func (f *Frame) Call1(fn, a1 uintptr) uintptr {
 	f.fn = fn
 	f.a1 = a1
-	return f.call()
+	return f.call(1)
 }
 
 //go:nosplit
 func (f *Frame) Call2(fn, a1, a2 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2 = a1, a2
-	return f.call()
+	return f.call(2)
 }
 
 //go:nosplit
 func (f *Frame) Call3(fn, a1, a2, a3 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3 = a1, a2, a3
-	return f.call()
+	return f.call(3)
 }
 
 //go:nosplit
 func (f *Frame) Call4(fn, a1, a2, a3, a4 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4 = a1, a2, a3, a4
-	return f.call()
+	return f.call(4)
 }
 
 //go:nosplit
 func (f *Frame) Call5(fn, a1, a2, a3, a4, a5 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5 = a1, a2, a3, a4, a5
-	return f.call()
+	return f.call(5)
 }
 
 //go:nosplit
 func (f *Frame) Call6(fn, a1, a2, a3, a4, a5, a6 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6 = a1, a2, a3, a4, a5, a6
-	return f.call()
+	return f.call(6)
 }
 
 //go:nosplit
 func (f *Frame) Call7(fn, a1, a2, a3, a4, a5, a6, a7 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7 = a1, a2, a3, a4, a5, a6, a7
-	return f.call()
+	return f.call(7)
 }
 
 //go:nosplit
 func (f *Frame) Call8(fn, a1, a2, a3, a4, a5, a6, a7, a8 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8 = a1, a2, a3, a4, a5, a6, a7, a8
-	return f.call()
+	return f.call(8)
 }
 
 //go:nosplit
 func (f *Frame) Call9(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9 = a1, a2, a3, a4, a5, a6, a7, a8, a9
-	return f.call()
+	return f.call(9)
 }
 
 //go:nosplit
 func (f *Frame) Call10(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10
-	return f.call()
+	return f.call(10)
 }
 
 //go:nosplit
 func (f *Frame) Call11(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10, f.a11 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11
-	return f.call()
+	return f.call(11)
 }
 
 //go:nosplit
 func (f *Frame) Call12(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10, f.a11, f.a12 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12
-	return f.call()
+	return f.call(12)
 }
 
 //go:nosplit
 func (f *Frame) Call13(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10, f.a11, f.a12, f.a13 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13
-	return f.call()
+	return f.call(13)
 }
 
 //go:nosplit
 func (f *Frame) Call14(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10, f.a11, f.a12, f.a13, f.a14 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14
-	return f.call()
+	return f.call(14)
 }
 
 //go:nosplit
 func (f *Frame) Call15(fn, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15 uintptr) uintptr {
 	f.fn = fn
 	f.a1, f.a2, f.a3, f.a4, f.a5, f.a6, f.a7, f.a8, f.a9, f.a10, f.a11, f.a12, f.a13, f.a14, f.a15 = a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15
-	return f.call()
-}
-
-//go:nosplit
-func (f *Frame) call() uintptr {
-	cgocall(trampoline, unsafe.Pointer(f))
-	return f.a1
-}
-
-// fnPtr turns the trampoline's address into a pointer. The laundering keeps go
-// vet's unsafeptr check quiet: this is a C address that never was a Go pointer,
-// the one case the rule is not protecting against.
-func fnPtr(u uintptr) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Pointer(&u))
+	return f.call(15)
 }
