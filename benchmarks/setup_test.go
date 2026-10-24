@@ -29,14 +29,20 @@ var (
 // (MoltenVK, KosmicKrisp) that the loader hides unless asked for it.
 var portability = runtime.GOOS == "darwin"
 
-func defaultLibvulkan() string {
+// libvulkanCandidates lists where to look for the loader. dyld no longer
+// searches /usr/local/lib for a bare name, so macOS names the usual installs.
+func libvulkanCandidates() []string {
 	if p := os.Getenv("VULKAN_LIBRARY"); p != "" {
-		return p
+		return []string{p}
 	}
-	if runtime.GOOS == "darwin" {
-		return "libvulkan.1.dylib"
+	if runtime.GOOS != "darwin" {
+		return []string{"libvulkan.so.1"}
 	}
-	return "libvulkan.so.1"
+	c := []string{"libvulkan.1.dylib"}
+	if sdk := os.Getenv("VULKAN_SDK"); sdk != "" {
+		c = append(c, sdk+"/lib/libvulkan.1.dylib")
+	}
+	return append(c, "/usr/local/lib/libvulkan.1.dylib", "/opt/homebrew/lib/libvulkan.1.dylib")
 }
 
 func cstr(s string) *byte { b := append([]byte(s), 0); return &b[0] }
@@ -48,8 +54,13 @@ func check(r vk.Result, what string) {
 }
 
 func setup() {
-	libvulkan = defaultLibvulkan()
-	lib, err := purego.Dlopen(libvulkan, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	var lib uintptr
+	var err error
+	for _, libvulkan = range libvulkanCandidates() {
+		if lib, err = purego.Dlopen(libvulkan, purego.RTLD_NOW|purego.RTLD_GLOBAL); err == nil {
+			break
+		}
+	}
 	if err != nil {
 		panic(err)
 	}
