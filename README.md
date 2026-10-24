@@ -137,6 +137,36 @@ CGO_CFLAGS=-I$VULKAN_SDK/include go test -run '^$' -bench . -count 10
 
 `bench_test.go` says what each row is and the settings macOS needs.
 
+### Without cgo
+
+The other Vulkan bindings that build with `CGO_ENABLED=0`, on the same machine
+and driver:
+
+| call | this | bnema/purego-vulkan | gogpu/wgpu | lukem570/vulkan-go |
+|---|---|---|---|---|
+| `CmdSetStencilReference` | 29.0 | 36.3 | 69.4 (2) | 74.5 (3) |
+| `CmdSetScissor`, one rect | 32.1 | 38.6 | 77.5 (3) | 191 (15) |
+| `GetDeviceQueue` | 27.1 | 34.9 | 73.0 (3) | 123 (6) |
+| `GetPhysicalDeviceProperties` | 35.0 | 42.6 | 80.4 (3) | 290 (4) |
+| `CreateBuffer` + `DestroyBuffer` | 78.3 | 108 (2) | 191 (10) | |
+
+- purego-vulkan calls through its own fork of purego, with fixed-arity calls
+  marked `go:uintptrescapes`: what a pointer argument addresses moves to the
+  heap. It covers a renderer's subset of the API, without the two dynamic-state
+  commands, so those rows call its `Syscall6` directly, as its wrappers do.
+- gogpu's Vulkan layer and lukem570/vulkan-go call through goffi, which takes
+  the arguments as a slice of pointers. lukem570's objects are destroyed by the
+  garbage collector, so it has no create-and-destroy row.
+- christerso/vulkan-go and opencl-pure/pureVK bind every command with
+  `purego.RegisterFunc`, the last column of the table above. They were not run:
+  the first loads only the Linux loader, the second is a compute subset.
+
+These libraries each define the same runtime symbols when cgo is off, so no two
+of them link into one program. purego-vulkan and this binding were measured in
+separate `CGO_ENABLED=0` programs; gogpu and lukem570 beside this binding with
+cgo on, which moves this binding's numbers by about a nanosecond. That code is
+not in the repository.
+
 ## Platforms
 
 amd64 and arm64 on Linux, Windows and macOS. With `CGO_ENABLED=0`, FreeBSD does
