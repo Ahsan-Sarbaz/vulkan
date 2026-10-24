@@ -33,7 +33,10 @@
 // program may well open two. The first InitDevice resolves straight to that
 // device's driver; a second, different device switches every device-level entry
 // point to the loader's trampolines, which dispatch on the handle passed and so
-// serve every device, at the cost of one indirection a call.
+// serve every device, at the cost of one indirection a call. Destroying the
+// directly resolved device through DestroyDevice releases it, so a program that
+// replaces its one device -- after a device loss, say -- resolves the new one
+// directly too.
 //
 // # Layout
 //
@@ -75,6 +78,9 @@ var (
 	// shared once a second device made them trampolines.
 	device   uintptr
 	resolved = map[string]bool{}
+	// initialised records which levels have been resolved at least once, so
+	// MissingBelow asks only about tiers that have had their chance.
+	initialised [3]bool
 )
 
 // shared marks device-level entry points resolved through the loader's
@@ -116,7 +122,16 @@ func InitDevice(dev Device) []string {
 	}
 }
 
+// forgetDevice is what DestroyDevice calls: a destroyed device no longer holds
+// the directly resolved entry points, so the next InitDevice may take them.
+func forgetDevice(d uintptr) {
+	if device == d {
+		device = 0
+	}
+}
+
 func resolve(level uint8, handle uintptr) []string {
+	initialised[level] = true
 	var absent []string
 	for _, e := range procs {
 		if e.level != level {
@@ -166,8 +181,9 @@ func lookupDevice(device uintptr, name string) uintptr {
 }
 
 // MissingBelow returns every entry point introduced at or below a core Vulkan
-// version that has not resolved, sorted. Empty means the driver has all of it.
-// Call it after InitDevice: until then the device level counts as missing.
+// version that did not resolve, among the levels initialised so far, sorted.
+// Empty means the driver has all of it. Asked after each of Init, InitInstance
+// and InitDevice, it checks that tier.
 //
 // This is the check a program wants. An extension entry point that did not
 // resolve is normal -- the instance simply did not enable that extension -- so
@@ -175,7 +191,7 @@ func lookupDevice(device uintptr, name string) uintptr {
 func MissingBelow(version float64) []string {
 	var absent []string
 	for _, e := range procs {
-		if e.ver > 0 && e.ver <= version && !resolved[e.name] {
+		if e.ver > 0 && e.ver <= version && initialised[e.level] && !resolved[e.name] {
 			absent = append(absent, e.name)
 		}
 	}

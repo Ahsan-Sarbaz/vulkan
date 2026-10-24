@@ -50,15 +50,17 @@ Windows load `vulkan-1.dll` with `syscall.LoadLibrary` and `GetProcAddress`. A
 windowing library that already loaded Vulkan, such as GLFW, can hand over its
 own `vkGetInstanceProcAddr` instead.
 
-`Supported`, `MustSupport` and `MissingBelow` report what has resolved so far,
-so ask them after the level in question is initialised. Calling an entry point
-that did not resolve panics naming it.
+`Supported` and `MustSupport` report what has resolved so far. `MissingBelow`
+looks only at the levels initialised so far, so asking it after each `Init` call
+checks that tier. Calling an entry point that did not resolve panics naming it.
 
 The entry points are package state, so they serve one instance at a time. The
 first device resolves straight to its driver through `vkGetDeviceProcAddr`. A
 second device switches every device-level entry point to the loader's
 trampolines, which dispatch on the handle and so serve all devices, at the cost
-of one indirection a call.
+of one indirection a call. A device destroyed with `DestroyDevice` gives up its
+place, so replacing your one device -- after a device loss, say -- keeps the
+direct path.
 
 ### Shape of the API
 

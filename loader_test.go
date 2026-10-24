@@ -34,14 +34,14 @@ func saveLoader(t *testing.T) {
 		ptrs[i] = *e.p
 	}
 	gipa, gdpa, inst, dev := getInstanceProcAddr, getDeviceProcAddr, instance, device
-	res := resolved
-	resolved = map[string]bool{}
+	res, levels := resolved, initialised
+	resolved, initialised = map[string]bool{}, [3]bool{}
 	t.Cleanup(func() {
 		for i, e := range procs {
 			*e.p = ptrs[i]
 		}
 		getInstanceProcAddr, getDeviceProcAddr, instance, device = gipa, gdpa, inst, dev
-		resolved = res
+		resolved, initialised = res, levels
 	})
 }
 
@@ -56,8 +56,8 @@ func TestSupportedBeforeInit(t *testing.T) {
 	if err := MustSupport("vkNoSuchCommand"); err == nil {
 		t.Error("MustSupport accepted an unknown name")
 	}
-	if len(MissingBelow(1.0)) == 0 {
-		t.Error("MissingBelow(1.0) is empty before anything resolved")
+	if missing := MissingBelow(1.0); len(missing) != 0 {
+		t.Errorf("MissingBelow(1.0) before any Init asks about levels never initialised: %v", missing)
 	}
 }
 
@@ -85,7 +85,14 @@ func TestDeviceDispatch(t *testing.T) {
 	if !Supported("vkCreateInstance") || Supported("vkCreateDevice") {
 		t.Fatal("Init resolved the wrong level")
 	}
+	// Each tier is checked as it is initialised, not failed for the next.
+	if missing := MissingBelow(1.0); len(missing) != 0 {
+		t.Errorf("MissingBelow(1.0) after Init: %v", missing)
+	}
 	InitInstance(Instance(0x10))
+	if missing := MissingBelow(1.0); len(missing) != 0 {
+		t.Errorf("MissingBelow(1.0) after InitInstance: %v", missing)
+	}
 	InitDevice(Device(0x20))
 	if pCmdDraw != fromDevice {
 		t.Fatalf("first device: vkCmdDraw = %#x, want the driver's %#x", pCmdDraw, fromDevice)
@@ -100,6 +107,39 @@ func TestDeviceDispatch(t *testing.T) {
 	InitDevice(Device(0x30))
 	if pCmdDraw != fromInstance {
 		t.Fatalf("second device: vkCmdDraw = %#x, want the loader's trampoline %#x", pCmdDraw, fromInstance)
+	}
+}
+
+// A device replaced rather than added -- the first destroyed, then a new one --
+// still resolves directly. That is what recovering from a device loss does.
+func TestReplacedDeviceResolvesDirectly(t *testing.T) {
+	saveLoader(t)
+	gdpa := purego.NewCallback(func(dev uintptr, name *byte) uintptr {
+		if strings.HasPrefix(cString(name), "vkCmd") {
+			return fromDevice
+		}
+		return 0
+	})
+	gipa := purego.NewCallback(func(inst uintptr, name *byte) uintptr {
+		if cString(name) == "vkGetDeviceProcAddr" {
+			return gdpa
+		}
+		return fromInstance
+	})
+	destroyed := uintptr(0)
+	destroy := purego.NewCallback(func(dev, alloc uintptr) { destroyed = dev })
+
+	Init(gipa)
+	InitInstance(Instance(0x10))
+	InitDevice(Device(0x20))
+	pDestroyDevice = destroy
+	DestroyDevice(Device(0x20), nil)
+	if destroyed != 0x20 {
+		t.Fatalf("DestroyDevice reached C with %#x", destroyed)
+	}
+	InitDevice(Device(0x40))
+	if pCmdDraw != fromDevice {
+		t.Fatalf("replacement device: vkCmdDraw = %#x, want the driver's %#x", pCmdDraw, fromDevice)
 	}
 }
 

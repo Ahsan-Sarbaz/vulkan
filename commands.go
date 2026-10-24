@@ -5259,6 +5259,7 @@ func DestroyDevice(device Device, pAllocator *AllocationCallbacks) {
 	}
 	new(ccall.Frame).Call2(pDestroyDevice, uintptr(device), uintptr(unsafe.Pointer(pAllocator)))
 	runtime.KeepAlive(pAllocator)
+	forgetDevice(uintptr(device))
 }
 
 // DestroyEvent is vkDestroyEvent, from Vulkan 1.0.

@@ -220,6 +220,10 @@ func emitCall(b *bytes.Buffer, f vkFn) {
 			fmt.Fprintf(&keep, "\truntime.KeepAlive(%s)\n", p.Name)
 		}
 	}
+	if f.CName == "vkDestroyDevice" {
+		// The loader resolves one device directly; this frees it for the next.
+		keep.WriteString("\tforgetDevice(uintptr(device))\n")
+	}
 	switch {
 	case f.Ret == "":
 		fmt.Fprintf(b, "\t%s\n%s", call, keep.String())
